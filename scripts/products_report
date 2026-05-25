@@ -1,0 +1,117 @@
+/*
+===============================================================================
+Product Report
+===============================================================================
+Purpose:
+    - This report consolidates key product metrics and behaviors.
+
+Highlights:
+    1. Gathers essential fields such as product name, category, subcategory, and cost.
+    2. Segments products by revenue to identify High-Performers, Mid-Range, or Low-Performers.
+    3. Aggregates product-level metrics:
+       - total orders
+       - total sales
+       - total quantity sold
+       - total customers (unique)
+       - lifespan (in months)
+    4. Calculates valuable KPIs:
+       - recency (months since last sale)
+       - average order revenue (AOR)
+       - average monthly revenue
+===============================================================================
+*/
+IF OBJECT_ID('gold.report_products', 'V') IS NOT NULL
+    DROP VIEW gold.report_products
+GO
+
+CREATE VIEW gold.report_products AS
+
+WITH basic_info AS (
+-- Joining tables and selecting data needed fo further transformations
+    SELECT
+        fc.customer_key,
+        fc.order_number,
+        fc.product_key,
+        fc.order_date,
+        fc.sales_amount,
+        fc.quantity,
+        fc.price,
+        dp.category,
+        dp.product_name,
+        dp.subcategory,
+        dp.cost
+    FROM gold.fact_sales fc
+    LEFT JOIN gold.dim_products dp
+    ON fc.product_key = dp.product_key
+    WHERE fc.order_date IS NOT NULL
+),
+aggregations AS (
+-- aggregating basic information and preparing them for final calculations
+    SELECT
+        product_name,
+        product_key,
+        category,
+        subcategory,
+        cost,
+-- Calculating total revenue of the product       
+        SUM(sales_amount) AS total_sales_by_product,
+
+-- Calculating how many units of product were sold        
+        SUM(quantity) AS total_quantity_sold,
+
+-- Calculating how many orders contain the product        
+        COUNT(DISTINCT order_number) AS total_orders_per_product,
+
+-- Calculating how many clients bought the product        
+        COUNT(DISTINCT customer_key) AS number_of_customers_who_bought_item,
+       
+-- Calculating when the product was bought most recently
+        MAX(order_date) AS most_recent_sale,
+
+-- Calculating lifespan of a product
+        CASE 
+            WHEN MIN(order_date) = MAX(order_date) THEN 1
+            ELSE DATEDIFF(MONTH, MIN(order_date), MAX(order_date))
+        END AS products_lifespan
+    FROM basic_info
+    GROUP BY 
+    product_key, 
+    product_name, 
+    category, 
+    subcategory, 
+    cost
+)
+-- Selecting data from aggregations, prerforming final calculations, renaming columns
+-- so they are more user friendly, grouping related columns together
+SELECT
+    product_key,
+    product_name,
+    category,
+    subcategory,
+    cost,
+    
+    total_sales_by_product AS total_sales,
+    total_quantity_sold AS total_quantity,
+    total_orders_per_product AS total_orders,
+    number_of_customers_who_bought_item AS total_customers,
+    
+    most_recent_sale,
+    products_lifespan AS lifespan,
+
+-- Calculating how many months ago the product was purchased
+    DATEDIFF(month, most_recent_sale, GETDATE()) AS recency_in_months,
+
+-- Calculating average revenue by single order  
+    CAST(CAST(total_sales_by_product AS DECIMAL(18,2)) / NULLIF(total_orders_per_product, 0) AS DECIMAL(18,2)) AS avg_order_revenue,
+
+-- Calculating average monthly revenue
+    CAST(CAST(total_sales_by_product AS DECIMAL(18,2)) / NULLIF(products_lifespan, 0) AS DECIMAL(18,2)) AS avg_revenue_by_month,
+
+-- Creating range in order to show performance of product
+    CASE
+        WHEN total_sales_by_product > 50000 THEN 'High-Performer'
+        WHEN total_sales_by_product >= 10000 THEN 'Mid-Range'
+        ELSE 'Low Performer'
+    END AS product_range
+
+FROM aggregations;
