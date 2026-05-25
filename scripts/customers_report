@@ -1,0 +1,120 @@
+/*
+=========================================================================
+Customer report
+=========================================================================
+Purpose:
+	- This report consolidates key customer metrics and behaviors
+
+Highlights:
+	1. Gathers essential fields such as names, ages and transaction details.
+	2. Segments customers into categories (VIP, Regular, New) and age groups.
+	3. Aggregates customer-level metrics:
+		- total orders
+		- total sales
+		- total quantity purchased
+		- total products
+		- lifespan (in months)
+	4. Calculates valuable KPIs:
+		- recency
+		- average order value
+		- average monthly spend
+=========================================================================
+*/
+IF OBJECT_ID('gold.report_customers', 'V') IS NOT NULL
+    DROP VIEW gold.report_customers;
+GO
+
+CREATE VIEW gold.report_customers AS
+
+WITH basic_information AS (
+-- Joining tables and selecting basic data needed for further analysis
+	SELECT
+		fs.order_number,
+		fs.order_date,
+		fs.sales_amount,
+		fs.quantity,
+		fs.product_key,
+
+		DATEDIFF(year, dc.birthdate, GETDATE()) AS age, 
+
+		CONCAT(dc.first_name, ' ', dc.last_name) AS full_name,
+
+		dc.customer_key
+	FROM gold.fact_sales fs
+	JOIN gold.dim_customers dc
+		ON fs.customer_key = dc.customer_key
+	WHERE fs.order_date IS NOT NULL
+),
+aggregations AS (
+-- Grouping data from CTE basic_informations needed for final report
+	SELECT
+		
+		customer_key,
+		full_name,
+		age,
+
+-- Calculating how many orders were placed by a single customer		
+		COUNT(DISTINCT order_number) AS number_of_orders_placed,
+
+-- Calculating total revenue by a single customer		
+		SUM(sales_amount) AS total_sales_by_customer,
+
+-- Calculating how many units of any product were bought by customer		
+		SUM(quantity) AS total_quantity_of_purchased_products,
+
+-- Calculating how many unique products were bought by customer		
+		COUNT(DISTINCT product_key) AS number_of_unique_products_purchased_by_client,
+
+-- Calculating date of a latest order		
+		MAX(order_date) AS latest_order,
+
+-- Calculating lifespan of a customers account		
+		CASE
+			WHEN MIN(order_date) = MAX(order_date) THEN 1
+			ELSE DATEDIFF(MONTH, MIN(order_date), MAX(order_date))
+		END AS accounts_lifespan
+	FROM basic_information
+	GROUP BY customer_key, full_name, age
+)
+SELECT
+-- Selecting data from aggregations, prerforming final calculations, renaming columns
+-- so they are more user friendly, grouping related columns together 
+	
+	customer_key,
+	full_name,
+	age,
+
+-- Creating range showing age of customer base	
+	CASE
+		WHEN age < 20 THEN 'Under 20'
+		WHEN age BETWEEN 20 AND 29 THEN '20-29'
+		WHEN age BETWEEN 30 AND 39 THEN '30-39'
+		WHEN age BETWEEN 40 AND 49 THEN '40-49'
+		ELSE '50 and above'
+	END AS age_group,
+
+-- Creating range showing importance of a customer 
+	CASE
+		WHEN accounts_lifespan >= 12 AND total_sales_by_customer > 5000 THEN 'VIP'
+		WHEN accounts_lifespan >= 12 AND total_sales_by_customer <= 5000 THEN 'Regular'
+		ELSE 'New'
+	END AS client_status,
+	
+	number_of_orders_placed AS number_of_orders,
+	number_of_unique_products_purchased_by_client AS number_of_products,
+	total_sales_by_customer AS total_sales,
+	total_quantity_of_purchased_products AS total_quantity,
+	latest_order,
+	accounts_lifespan,
+
+-- Calculating how many months ago last order was placed	
+	DATEDIFF(month, latest_order, GETDATE()) AS months_since_last_order,
+	
+-- Calculating average value of an order
+	CAST(CAST(total_sales_by_customer AS DECIMAL(18,2)) / NULLIF(number_of_orders_placed, 0) AS DECIMAL (18,2))
+    AS avg_order_value,
+
+-- Calculating average monthly revenue	
+	CAST(CAST(total_sales_by_customer AS DECIMAL(18,2)) / NULLIF(accounts_lifespan, 0) AS DECIMAL (18,2))
+    AS avg_monthly_spend
+FROM aggregations;
