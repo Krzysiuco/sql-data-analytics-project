@@ -1,11 +1,15 @@
----
-
 # Customer & Product Analytics Reports (SQL Server)
 
 This repository contains advanced SQL Server reporting views designed for customer and product analytics.
 The project demonstrates data aggregation, KPI calculations, customer segmentation, and product performance analysis using transactional sales data.
 
-## Overview
+This project was created as part of the course:
+
+**The Complete SQL Bootcamp (30 Hours): Go from Zero to Hero** by Baraa Khatib.
+
+---
+
+# Overview
 
 The solution consists of two analytical SQL views:
 
@@ -162,3 +166,5 @@ The reports use the following tables:
 * `gold.dim_products`
 
 ---
+
+
